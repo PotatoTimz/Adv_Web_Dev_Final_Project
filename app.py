@@ -1,4 +1,5 @@
 from flask import Flask, abort, jsonify, request
+import bcrypt
 from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -10,16 +11,21 @@ app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///pokemon.db"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-migrate = Migrate(app, db)
+migrate = Migrate(app, db)    
 
-class Base(DeclarativeBase):
-    pass
+PEPPER = b"thisissomepepper"
 
 class PokemonType(db.Model):
     __tablename__ = "pokemon_type"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True) 
     pokemon_id = Column("pokemon_id", Integer, ForeignKey("pokemon.id"))
     type_id = Column("type_id", Integer, ForeignKey("type.id"))      
+
+class Account(db.Model):
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True) 
+    username: Mapped[str] = mapped_column(nullable=False)
+    hashed_password: Mapped[str] = mapped_column(nullable=False)
+    salt: Mapped[str] = mapped_column(String(200), nullable=True)
 
 class Pokemon(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True) 
@@ -51,6 +57,14 @@ class DamageCategory(db.Model):
 #     type_id: Mapped[int] = mapped_column(ForeignKey("type.id"), nullable=False)
 #     #damage_category_id: Mapped[int] = mapped_column(ForeignKey("damagecategory.id"), nullable=False)
 #     move_list: Mapped["MoveList"] = relationship("MoveList", back_populates="moves")
+
+def hash_password(password):
+    salt = bcrypt.gensalt() 
+    password_with_pepper = password.encode('utf-8') + PEPPER 
+    hashed_password = bcrypt.hashpw(password_with_pepper, salt)
+    
+    return hashed_password, salt
+
 
 @app.route("/type", methods=["GET", "POST"])
 def manage_types():
@@ -112,6 +126,26 @@ def manage_damage_category():
     if request.method == "POST":
         data = request.json
 
+@app.route("/register", methods=["POST"])
+def register():
+    data = request.get_json()
 
+    if not data or not data.get("username") or not data.get("password"):
+        abort(400, "Invalid Input")
+    
+    username = data.get("username")
+    password = data.get("password")
+    
+    if Account.query.filter_by(username=username).first():
+        return jsonify({"message": "Username already exists. Please enter a unique username!"}), 401
+    
+    hashed_password, salt = hash_password(password)
+    
+    new_account = Account(username=username, hashed_password=hashed_password, salt=salt)
+    db.session.add(new_account)
+    db.session.commit()
+    
+    return jsonify({"message": "User registred successfully!"}), 201
+ 
 if __name__ == "__main__":
     app.run(debug=True)
